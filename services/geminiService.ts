@@ -28,7 +28,7 @@ export const generateAIResponse = async (
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ AIzaSyAdTKiuYf19ioXuINdm1p_rb3iKWDTENNk});
     
     const context = formatContext(subscribers, offers);
     const fullPrompt = `
