@@ -1,0 +1,296 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Users, Tag, Sparkles, Menu, X, Tv, AlertTriangle, ChevronRight, UserPlus, LogOut, Shield } from 'lucide-react';
+import { Subscriber, Offer, Status, User } from './types';
+import * as Storage from './services/storageService';
+
+import Dashboard from './components/Dashboard';
+import SubscribersList from './components/SubscribersList';
+import OffersList from './components/OffersList';
+import AIAssistant from './components/AIAssistant';
+import Login from './components/Login';
+import ResellersList from './components/ResellersList';
+
+const NavItem: React.FC<{ to: string; icon: React.ReactNode; label: string; onClick?: () => void }> = ({ to, icon, label, onClick }) => {
+    const location = useLocation();
+    const isActive = location.pathname === to;
+    
+    return (
+      <Link
+        to={to}
+        onClick={onClick}
+        className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
+          isActive 
+            ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/30' 
+            : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
+        }`}
+      >
+        {icon}
+        <span className="font-medium">{label}</span>
+      </Link>
+    );
+};
+
+const AppContent: React.FC = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showNotification, setShowNotification] = useState(true);
+
+  // Initial Load
+  useEffect(() => {
+    const currentUser = Storage.getCurrentUser();
+    if (currentUser) {
+      setUser(currentUser);
+    }
+  }, []);
+
+  // Data Loading Effect
+  useEffect(() => {
+    if (user) {
+      const subs = Storage.getSubscribers();
+      // If admin, show all. If reseller, show only theirs.
+      if (user.role === 'admin') {
+         setSubscribers(subs);
+      } else {
+         setSubscribers(subs.filter(s => s.resellerId === user.id));
+      }
+      setOffers(Storage.getOffers());
+    }
+  }, [user]);
+
+  const handleLogin = (loggedInUser: User) => {
+    setUser(loggedInUser);
+  };
+
+  const handleLogout = () => {
+    Storage.logoutUser();
+    setUser(null);
+  };
+
+  // CRUD Handlers
+  const handleAddSubscriber = (sub: Subscriber) => {
+    Storage.saveSubscriber(sub);
+    refreshData();
+  };
+
+  const handleEditSubscriber = (sub: Subscriber) => {
+    Storage.saveSubscriber(sub);
+    refreshData();
+  };
+
+  const handleDeleteSubscriber = (id: string) => {
+    if (window.confirm('Êtes-vous sûr de vouloir supprimer cet abonné ?')) {
+      Storage.deleteSubscriber(id);
+      refreshData();
+    }
+  };
+
+  const handleSaveOffer = (offer: Offer) => {
+    Storage.saveOffer(offer);
+    setOffers(Storage.getOffers()); // Refresh offers
+  };
+
+  const handleDeleteOffer = (id: string) => {
+    if (window.confirm('Êtes-vous sûr de vouloir supprimer cette offre ?')) {
+      Storage.deleteOffer(id);
+      setOffers(Storage.getOffers());
+    }
+  };
+
+  const refreshData = () => {
+    const subs = Storage.getSubscribers();
+    if (user?.role === 'admin') {
+        setSubscribers(subs);
+    } else if (user) {
+        setSubscribers(subs.filter(s => s.resellerId === user.id));
+    }
+  };
+
+  // Notifications Logic
+  const expiringCount = useMemo(() => {
+    const now = new Date();
+    const sevenDaysFromNow = new Date();
+    sevenDaysFromNow.setDate(now.getDate() + 7);
+
+    return subscribers.filter(s => {
+        const end = new Date(s.endDate);
+        return s.status === Status.ACTIVE && end > now && end <= sevenDaysFromNow;
+    }).length;
+  }, [subscribers]);
+
+  if (!user) {
+    return <Login onLogin={handleLogin} />;
+  }
+
+  return (
+    <div className="flex h-screen bg-slate-900 text-slate-100 overflow-hidden font-sans">
+      
+      {/* Mobile Header */}
+      <div className="md:hidden fixed top-0 left-0 right-0 bg-slate-900 border-b border-slate-800 p-4 flex justify-between items-center z-50">
+        <div className="flex items-center gap-2">
+          <div className="bg-brand-600 p-2 rounded-lg">
+             <Tv size={20} className="text-white" />
+          </div>
+          <span className="font-bold text-lg">ALL IPTV</span>
+        </div>
+        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="text-slate-300">
+          {isMobileMenuOpen ? <X /> : <Menu />}
+        </button>
+      </div>
+
+      {/* Sidebar */}
+      <div className={`
+        fixed md:static inset-y-0 left-0 z-40 w-72 bg-slate-900 border-r border-slate-800 flex flex-col transition-transform duration-300 ease-in-out
+        ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+      `}>
+        <div className="p-6 hidden md:flex items-center gap-3 mb-2">
+          <div className="bg-brand-600 p-2.5 rounded-xl shadow-lg shadow-brand-500/20">
+            <Tv size={24} className="text-white" />
+          </div>
+          <div>
+              <h1 className="text-xl font-bold tracking-tight text-white">ALL IPTV</h1>
+              <span className="text-xs text-slate-500 font-medium tracking-wider uppercase">Panel Admin</span>
+          </div>
+        </div>
+
+        {/* User Profile Snippet */}
+        <div className="mx-4 mb-6 p-4 bg-slate-800/50 rounded-xl border border-slate-800 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-brand-500 to-purple-500 flex items-center justify-center text-white font-bold">
+                {user.fullName.charAt(0)}
+            </div>
+            <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-white truncate">{user.fullName}</p>
+                <p className="text-xs text-slate-500 truncate capitalize">{user.role}</p>
+            </div>
+        </div>
+
+        <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 mb-2 mt-4">Menu Principal</div>
+          <NavItem 
+            to="/" 
+            icon={<LayoutDashboard size={20} />} 
+            label="Tableau de Bord" 
+            onClick={() => setIsMobileMenuOpen(false)} 
+          />
+          <NavItem 
+            to="/subscribers" 
+            icon={<Users size={20} />} 
+            label="Abonnés" 
+            onClick={() => setIsMobileMenuOpen(false)} 
+          />
+          <NavItem 
+            to="/offers" 
+            icon={<Tag size={20} />} 
+            label="Offres & Plans" 
+            onClick={() => setIsMobileMenuOpen(false)} 
+          />
+          
+          {user.role === 'admin' && (
+            <>
+                 <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 mb-2 mt-6">Administration</div>
+                 <NavItem 
+                    to="/resellers" 
+                    icon={<UserPlus size={20} />} 
+                    label="Revendeurs" 
+                    onClick={() => setIsMobileMenuOpen(false)} 
+                 />
+            </>
+          )}
+
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 mb-2 mt-6">Outils</div>
+          <NavItem 
+            to="/ai-assistant" 
+            icon={<Sparkles size={20} />} 
+            label="Assistant IA" 
+            onClick={() => setIsMobileMenuOpen(false)} 
+          />
+        </nav>
+
+        <div className="p-4 border-t border-slate-800">
+            <button 
+                onClick={handleLogout}
+                className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-slate-400 hover:bg-rose-500/10 hover:text-rose-500 transition-colors"
+            >
+                <LogOut size={20} />
+                <span className="font-medium">Déconnexion</span>
+            </button>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col min-w-0 h-full bg-slate-950 relative pt-16 md:pt-0">
+        
+        {/* Notification Banner */}
+        {showNotification && expiringCount > 0 && (
+            <div className="bg-amber-500/10 border-b border-amber-500/20 px-6 py-3 flex items-center justify-between animate-in slide-in-from-top-2 duration-300">
+                <div className="flex items-center gap-3 text-amber-400">
+                    <AlertTriangle size={18} className="animate-pulse" />
+                    <span className="text-sm font-medium">
+                        Attention : <span className="font-bold">{expiringCount}</span> abonnement(s) expirent dans les 7 prochains jours.
+                    </span>
+                </div>
+                <div className="flex items-center gap-4">
+                    <Link to="/subscribers" className="text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1">
+                        Voir la liste <ChevronRight size={14} />
+                    </Link>
+                    <button onClick={() => setShowNotification(false)} className="text-amber-400/60 hover:text-amber-400">
+                        <X size={16} />
+                    </button>
+                </div>
+            </div>
+        )}
+
+        {/* Routes */}
+        <div className="flex-1 overflow-hidden">
+            <Routes>
+            <Route path="/" element={<Dashboard subscribers={subscribers} offers={offers} />} />
+            <Route 
+                path="/subscribers" 
+                element={
+                <SubscribersList 
+                    subscribers={subscribers} 
+                    offers={offers} 
+                    currentUser={user}
+                    onAdd={handleAddSubscriber} 
+                    onEdit={handleEditSubscriber} 
+                    onDelete={handleDeleteSubscriber} 
+                />
+                } 
+            />
+            <Route 
+                path="/offers" 
+                element={
+                <OffersList 
+                    offers={offers} 
+                    userRole={user.role}
+                    onSave={handleSaveOffer} 
+                    onDelete={handleDeleteOffer} 
+                />
+                } 
+            />
+            <Route path="/ai-assistant" element={<AIAssistant subscribers={subscribers} offers={offers} />} />
+            <Route 
+                path="/resellers" 
+                element={
+                    user.role === 'admin' ? <ResellersList /> : <Navigate to="/" />
+                } 
+            />
+            <Route path="*" element={<Navigate to="/" />} />
+            </Routes>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <HashRouter>
+      <AppContent />
+    </HashRouter>
+  );
+};
+
+export default App;
