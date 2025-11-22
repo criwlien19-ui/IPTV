@@ -1,98 +1,199 @@
+
+import { createClient } from '@supabase/supabase-js';
 import { Subscriber, Offer, Status, User } from '../types';
 
-const SUBS_KEY = 'iptv_subscribers';
-const OFFERS_KEY = 'iptv_offers';
-const USERS_KEY = 'iptv_users';
+// Fonction sécurisée pour récupérer les variables d'environnement
+// Empêche le crash si import.meta.env est indéfini
+const getEnv = (key: string, defaultValue: string): string => {
+  let value: string | undefined;
+
+  try {
+    // Essai via Vite (import.meta.env)
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      // @ts-ignore
+      value = import.meta.env[key];
+    }
+  } catch (e) {
+    console.warn('Error accessing import.meta.env', e);
+  }
+
+  // Fallback via process.env (si injecté via vite.config.ts define)
+  if (!value) {
+    try {
+      if (typeof process !== 'undefined' && process.env) {
+        value = process.env[key];
+      }
+    } catch (e) {
+      // Ignore errors accessing process
+    }
+  }
+
+  return value || defaultValue;
+};
+
+const supabaseUrl = getEnv('VITE_SUPABASE_URL', 'https://yemkrwzlzlmuryfeycsv.supabase.co');
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InllbWtyd3psemxtdXJ5ZmV5Y3N2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM4MjE5NTAsImV4cCI6MjA3OTM5Nzk1MH0.bS9XphH4UIHCBFMezAzVlE7NzlieGXhddcBfjSjbXJQ');
+
+// Initialisation du client, gestion du cas où les clés manquent ou sont invalides
+export const supabase = (supabaseUrl && supabaseUrl.startsWith('http') && supabaseAnonKey) 
+  ? createClient(supabaseUrl, supabaseAnonKey) 
+  : null;
+
 const CURRENT_USER_KEY = 'iptv_current_user';
 
-// Initial Data Seeding
-// Conversion approximative : 10€ ~ 6500 XOF
-const INITIAL_OFFERS: Offer[] = [
-  { id: '1', name: 'Pack Basic', price: 6500, durationMonths: 1, maxConnections: 1, description: 'Accès SD/HD, 1 écran' },
-  { id: '2', name: 'Pack Gold', price: 16500, durationMonths: 3, maxConnections: 2, description: 'Accès FHD/4K, 2 écrans, VOD incluse' },
-  { id: '3', name: 'Pack Platinum', price: 52000, durationMonths: 12, maxConnections: 4, description: 'Accès VIP, 4 écrans, Séries+Films' },
+// --- Mappers (DB Snake Case <-> App Camel Case) ---
+const mapUserFromDB = (u: any): User => ({
+  id: u.id,
+  username: u.username,
+  password: u.password,
+  fullName: u.full_name,
+  role: u.role as any,
+});
+
+const mapOfferFromDB = (o: any): Offer => ({
+  id: o.id,
+  name: o.name,
+  price: o.price,
+  durationMonths: o.duration_months,
+  maxConnections: o.max_connections,
+  description: o.description,
+  imageUrl: o.image_url
+});
+
+const mapSubscriberFromDB = (s: any): Subscriber => ({
+  id: s.id,
+  fullName: s.full_name,
+  email: s.email,
+  phone: s.phone,
+  offerId: s.offer_id,
+  startDate: s.start_date,
+  endDate: s.end_date,
+  status: s.status as Status,
+  notes: s.notes,
+  macAddress: s.mac_address,
+  resellerId: s.reseller_id
+});
+
+// --- Seed Data (Fallback) ---
+const INITIAL_OFFERS = [
+  { id: '1', name: 'Pack Basic', price: 6500, duration_months: 1, max_connections: 1, description: 'Accès SD/HD, 1 écran' },
+  { id: '2', name: 'Pack Gold', price: 16500, duration_months: 3, max_connections: 2, description: 'Accès FHD/4K, 2 écrans, VOD incluse' },
+  { id: '3', name: 'Pack Platinum', price: 52000, duration_months: 12, max_connections: 4, description: 'Accès VIP, 4 écrans, Séries+Films' },
 ];
 
-// Initial Admin User
-const INITIAL_ADMIN: User = {
+const INITIAL_ADMIN = {
   id: 'admin',
   username: 'admin',
-  password: 'admin', // Mot de passe par défaut
-  fullName: 'Administrateur Principal',
+  password: 'admin',
+  full_name: 'Administrateur Principal',
   role: 'admin'
 };
 
-const INITIAL_SUBS: Subscriber[] = [
-  { 
-    id: '101', 
-    fullName: 'Jean Dupont', 
-    email: 'jean.d@example.com', 
-    offerId: '2', 
-    startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), 
-    endDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(), 
-    status: Status.ACTIVE,
-    macAddress: '00:1A:2B:3C:4D:5E',
-    resellerId: 'admin'
-  },
-  { 
-    id: '102', 
-    fullName: 'Marie Curier', 
-    email: 'marie.c@example.com', 
-    offerId: '1', 
-    startDate: new Date(Date.now() - 25 * 24 * 60 * 60 * 1000).toISOString(), 
-    endDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(), 
-    status: Status.ACTIVE, // Expires soon
-    notes: 'Client fidèle, proposer promo',
-    resellerId: 'admin'
-  },
-  { 
-    id: '103', 
-    fullName: 'Paul Martin', 
-    email: 'paul.m@example.com', 
-    offerId: '3', 
-    startDate: new Date(Date.now() - 370 * 24 * 60 * 60 * 1000).toISOString(), 
-    endDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), 
-    status: Status.EXPIRED,
-    resellerId: 'admin'
-  }
-];
+// --- Service Methods ---
+
+export const checkConnection = async (): Promise<boolean> => {
+    if (!supabase) return false;
+    try {
+      const { error } = await supabase.from('users').select('count', { count: 'exact', head: true });
+      return !error;
+    } catch (e) {
+      console.error("Connection check failed:", e);
+      return false;
+    }
+};
+
+export const initDatabase = async () => {
+    if (!supabase) return;
+
+    try {
+      // Check if admin exists
+      const { data: users } = await supabase.from('users').select('*').eq('username', 'admin');
+      if (!users || users.length === 0) {
+          await supabase.from('users').insert([INITIAL_ADMIN]);
+          console.log('Admin user seeded');
+      }
+
+      // Check if offers exist
+      const { data: offers } = await supabase.from('offers').select('*');
+      if (!offers || offers.length === 0) {
+          await supabase.from('offers').insert(INITIAL_OFFERS);
+          console.log('Initial offers seeded');
+      }
+    } catch (e) {
+      console.error("Error seeding database:", e);
+    }
+};
+
+/**
+ * Subscribes to realtime changes in the database
+ * Triggers the callback whenever a change occurs in subscribers or offers
+ */
+export const subscribeToDataChanges = (callback: () => void) => {
+  if (!supabase) return () => {};
+
+  const channel = supabase
+    .channel('public-db-changes')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+      },
+      (payload) => {
+        console.log('Realtime change received:', payload);
+        callback();
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+};
 
 // --- Users ---
 
-export const getUsers = (): User[] => {
-  const data = localStorage.getItem(USERS_KEY);
-  if (!data) {
-    localStorage.setItem(USERS_KEY, JSON.stringify([INITIAL_ADMIN]));
-    return [INITIAL_ADMIN];
-  }
-  return JSON.parse(data);
+export const getUsers = async (): Promise<User[]> => {
+  if (!supabase) return [];
+  const { data, error } = await supabase.from('users').select('*');
+  if (error) { console.error(error); return []; }
+  return data.map(mapUserFromDB);
 };
 
-export const saveUser = (user: User): void => {
-  const users = getUsers();
-  const existingIndex = users.findIndex(u => u.id === user.id);
-  if (existingIndex >= 0) {
-    users[existingIndex] = user;
-  } else {
-    users.push(user);
-  }
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+export const saveUser = async (user: User): Promise<void> => {
+  if (!supabase) return;
+  const dbUser = {
+      id: user.id,
+      username: user.username,
+      password: user.password,
+      full_name: user.fullName,
+      role: user.role
+  };
+  const { error } = await supabase.from('users').upsert(dbUser);
+  if (error) console.error('Error saving user:', error);
 };
 
-export const deleteUser = (id: string): void => {
-  if (id === 'admin') return; // Cannot delete main admin
-  const users = getUsers().filter(u => u.id !== id);
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+export const deleteUser = async (id: string): Promise<void> => {
+  if (!supabase || id === 'admin') return;
+  await supabase.from('users').delete().eq('id', id);
 };
 
-export const loginUser = (username: string, password: string): User | null => {
-  const users = getUsers();
-  const user = users.find(u => u.username === username && u.password === password);
-  if (user) {
-    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
-    return user;
-  }
-  return null;
+export const loginUser = async (username: string, password: string): Promise<User | null> => {
+  if (!supabase) return null;
+  
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('username', username)
+    .eq('password', password)
+    .single();
+
+  if (error || !data) return null;
+
+  const user = mapUserFromDB(data);
+  localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+  return user;
 };
 
 export const getCurrentUser = (): User | null => {
@@ -106,77 +207,62 @@ export const logoutUser = (): void => {
 
 // --- Offers ---
 
-export const getOffers = (): Offer[] => {
-  const data = localStorage.getItem(OFFERS_KEY);
-  if (!data) {
-    localStorage.setItem(OFFERS_KEY, JSON.stringify(INITIAL_OFFERS));
-    return INITIAL_OFFERS;
-  }
-  return JSON.parse(data);
+export const getOffers = async (): Promise<Offer[]> => {
+  if (!supabase) return [];
+  const { data, error } = await supabase.from('offers').select('*');
+  if (error) { console.error(error); return []; }
+  return data.map(mapOfferFromDB);
 };
 
-export const saveOffer = (offer: Offer): void => {
-  const offers = getOffers();
-  const existingIndex = offers.findIndex(o => o.id === offer.id);
-  if (existingIndex >= 0) {
-    offers[existingIndex] = offer;
-  } else {
-    offers.push(offer);
-  }
-  localStorage.setItem(OFFERS_KEY, JSON.stringify(offers));
+export const saveOffer = async (offer: Offer): Promise<void> => {
+  if (!supabase) return;
+  const dbOffer = {
+    id: offer.id,
+    name: offer.name,
+    price: offer.price,
+    duration_months: offer.durationMonths,
+    max_connections: offer.maxConnections,
+    description: offer.description,
+    image_url: offer.imageUrl
+  };
+  const { error } = await supabase.from('offers').upsert(dbOffer);
+  if (error) console.error('Error saving offer:', error);
 };
 
-export const deleteOffer = (id: string): void => {
-  const offers = getOffers().filter(o => o.id !== id);
-  localStorage.setItem(OFFERS_KEY, JSON.stringify(offers));
-};
-
-export const getOfferById = (id: string): Offer | undefined => {
-  return getOffers().find(o => o.id === id);
+export const deleteOffer = async (id: string): Promise<void> => {
+  if (!supabase) return;
+  await supabase.from('offers').delete().eq('id', id);
 };
 
 // --- Subscribers ---
 
-export const getSubscribers = (): Subscriber[] => {
-  const data = localStorage.getItem(SUBS_KEY);
-  let subs: Subscriber[] = [];
-  
-  if (!data) {
-    localStorage.setItem(SUBS_KEY, JSON.stringify(INITIAL_SUBS));
-    subs = INITIAL_SUBS;
-  } else {
-    subs = JSON.parse(data);
-  }
-
-  // Migration logic: ensure all subs have a resellerId if old data exists
-  let modified = false;
-  subs = subs.map(s => {
-      if (!s.resellerId) {
-          modified = true;
-          return { ...s, resellerId: 'admin' };
-      }
-      return s;
-  });
-  
-  if (modified) {
-      localStorage.setItem(SUBS_KEY, JSON.stringify(subs));
-  }
-
-  return subs;
+export const getSubscribers = async (): Promise<Subscriber[]> => {
+  if (!supabase) return [];
+  const { data, error } = await supabase.from('subscribers').select('*');
+  if (error) { console.error(error); return []; }
+  return data.map(mapSubscriberFromDB);
 };
 
-export const saveSubscriber = (sub: Subscriber): void => {
-  const subs = getSubscribers();
-  const existingIndex = subs.findIndex(s => s.id === sub.id);
-  if (existingIndex >= 0) {
-    subs[existingIndex] = sub;
-  } else {
-    subs.push(sub);
-  }
-  localStorage.setItem(SUBS_KEY, JSON.stringify(subs));
+export const saveSubscriber = async (sub: Subscriber): Promise<void> => {
+  if (!supabase) return;
+  const dbSub = {
+    id: sub.id,
+    full_name: sub.fullName,
+    email: sub.email,
+    phone: sub.phone,
+    offer_id: sub.offerId,
+    start_date: sub.startDate,
+    end_date: sub.endDate,
+    status: sub.status,
+    notes: sub.notes,
+    mac_address: sub.macAddress,
+    reseller_id: sub.resellerId
+  };
+  const { error } = await supabase.from('subscribers').upsert(dbSub);
+  if (error) console.error('Error saving subscriber:', error);
 };
 
-export const deleteSubscriber = (id: string): void => {
-  const subs = getSubscribers().filter(s => s.id !== id);
-  localStorage.setItem(SUBS_KEY, JSON.stringify(subs));
+export const deleteSubscriber = async (id: string): Promise<void> => {
+  if (!supabase) return;
+  await supabase.from('subscribers').delete().eq('id', id);
 };

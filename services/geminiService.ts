@@ -24,11 +24,11 @@ export const generateAIResponse = async (
   offers: Offer[]
 ): Promise<string> => {
   if (!apiKey) {
-    return "Erreur: Clé API non trouvée (process.env.API_KEY).";
+    return "Erreur de configuration : La clé API Gemini est manquante. Veuillez vérifier vos variables d'environnement.";
   }
 
   try {
-    const ai = new GoogleGenAI({ AIzaSyAdTKiuYf19ioXuINdm1p_rb3iKWDTENNk});
+    const ai = new GoogleGenAI({ apiKey });
     
     const context = formatContext(subscribers, offers);
     const fullPrompt = `
@@ -48,15 +48,15 @@ export const generateAIResponse = async (
       contents: fullPrompt,
     });
 
-    return response.text || "Je n'ai pas pu générer de réponse.";
+    return response.text || "Désolé, je n'ai pas pu générer de réponse pertinente pour le moment.";
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return "Une erreur s'est produite lors de la communication avec l'IA.";
+    return "Une erreur technique s'est produite lors de la communication avec l'IA. Veuillez réessayer plus tard.";
   }
 };
 
 export const generateRenewalEmail = async (subscriber: Subscriber, offer: Offer): Promise<string> => {
-    if (!apiKey) return "Clé API manquante.";
+    if (!apiKey) return "Erreur : Clé API manquante.";
     
     try {
         const ai = new GoogleGenAI({ apiKey });
@@ -82,14 +82,18 @@ export const generateRenewalEmail = async (subscriber: Subscriber, offer: Offer)
             model: 'gemini-2.5-flash',
             contents: prompt
         });
-        return response.text || "Erreur de génération.";
+        return response.text || "Erreur : La génération de l'email a échoué.";
     } catch (e) {
-        return "Erreur lors de la génération de l'email.";
+        console.error(e);
+        return "Erreur : Impossible de contacter le service d'IA.";
     }
 };
 
 export const generateOfferImage = async (offerName: string, description: string): Promise<string | null> => {
-    if (!apiKey) return null;
+    if (!apiKey) {
+        console.error("API Key missing for image generation");
+        return null;
+    }
   
     try {
       const ai = new GoogleGenAI({ apiKey });

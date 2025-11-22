@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '../types';
-import { Plus, Edit2, Trash2, UserCheck, Shield } from 'lucide-react';
+import { Plus, Edit2, Trash2, UserCheck, Shield, Loader2 } from 'lucide-react';
 import * as Storage from '../services/storageService';
 
 const ResellersList: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState<Partial<User>>({
     role: 'reseller'
   });
@@ -15,14 +16,17 @@ const ResellersList: React.FC = () => {
     loadUsers();
   }, []);
 
-  const loadUsers = () => {
-    setUsers(Storage.getUsers());
+  const loadUsers = async () => {
+    setLoading(true);
+    const data = await Storage.getUsers();
+    setUsers(data);
+    setLoading(false);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (id === 'admin') return; // Protection
     if (window.confirm('Êtes-vous sûr de vouloir supprimer ce revendeur ? Ses abonnés ne seront pas supprimés mais devront être réassignés.')) {
-        Storage.deleteUser(id);
+        await Storage.deleteUser(id);
         loadUsers();
     }
   };
@@ -43,22 +47,26 @@ const ResellersList: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.username || !formData.password) return;
 
     const newUser: User = {
-      id: editingUser ? editingUser.id : Date.now().toString(),
+      id: editingUser ? editingUser.id : crypto.randomUUID(),
       username: formData.username,
       password: formData.password,
       fullName: formData.fullName || 'Revendeur',
       role: formData.role || 'reseller'
     };
 
-    Storage.saveUser(newUser);
-    loadUsers();
+    await Storage.saveUser(newUser);
+    await loadUsers();
     setIsModalOpen(false);
   };
+
+  if (loading && users.length === 0) {
+      return <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin text-brand-500" size={32}/></div>;
+  }
 
   return (
     <div className="p-6 h-full flex flex-col overflow-hidden">

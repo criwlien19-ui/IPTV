@@ -2,7 +2,6 @@ import React, { useMemo } from 'react';
 import { Subscriber, Offer, Status } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Users, CreditCard, AlertTriangle, TrendingUp } from 'lucide-react';
-import { getOfferById } from '../services/storageService';
 
 interface DashboardProps {
   subscribers: Subscriber[];
@@ -10,6 +9,9 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ subscribers, offers }) => {
+
+  // Helper to replace the removed imported service
+  const findOffer = (id: string) => offers.find(o => o.id === id);
 
   const stats = useMemo(() => {
     const active = subscribers.filter(s => s.status === Status.ACTIVE).length;
@@ -25,24 +27,22 @@ const Dashboard: React.FC<DashboardProps> = ({ subscribers, offers }) => {
     }).length;
 
     const revenue = subscribers.reduce((acc, sub) => {
-      // Simplification: Assume total historical revenue based on current offer price
-      // In a real app, we would have a transaction history.
-      const offer = getOfferById(sub.offerId);
+      const offer = findOffer(sub.offerId);
       return acc + (offer ? offer.price : 0);
     }, 0);
 
     return { active, expired, expiringSoon, revenue };
-  }, [subscribers]);
+  }, [subscribers, offers]);
 
   const offerDistribution = useMemo(() => {
     const dist: Record<string, number> = {};
     subscribers.forEach(sub => {
-      const offer = getOfferById(sub.offerId);
+      const offer = findOffer(sub.offerId);
       const name = offer ? offer.name : 'Inconnu';
       dist[name] = (dist[name] || 0) + 1;
     });
     return Object.keys(dist).map(key => ({ name: key, value: dist[key] }));
-  }, [subscribers]);
+  }, [subscribers, offers]);
 
   const statusDistribution = useMemo(() => {
     const dist: Record<string, number> = {};

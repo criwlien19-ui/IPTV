@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { Offer, UserRole } from '../types';
-import { Plus, Edit2, Trash2, Package, Sparkles, Loader, Lock } from 'lucide-react';
+import { Plus, Edit2, Trash2, Package, Sparkles, Loader, Lock, AlertCircle, Loader2 } from 'lucide-react';
 import { generateOfferImage } from '../services/geminiService';
 
 interface OffersListProps {
   offers: Offer[];
   userRole: UserRole;
-  onSave: (offer: Offer) => void;
-  onDelete: (id: string) => void;
+  onSave: (offer: Offer) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
 }
 
 const OffersList: React.FC<OffersListProps> = ({ offers, userRole, onSave, onDelete }) => {
@@ -15,6 +15,8 @@ const OffersList: React.FC<OffersListProps> = ({ offers, userRole, onSave, onDel
   const [editingOffer, setEditingOffer] = useState<Offer | null>(null);
   const [formData, setFormData] = useState<Partial<Offer>>({});
   const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const isAdmin = userRole === 'admin';
 
@@ -37,10 +39,11 @@ const OffersList: React.FC<OffersListProps> = ({ offers, userRole, onSave, onDel
     setIsModalOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
     const newOffer: Offer = {
-      id: editingOffer ? editingOffer.id : Date.now().toString(),
+      id: editingOffer ? editingOffer.id : crypto.randomUUID(), // UUID for DB
       name: formData.name || 'Nouvelle Offre',
       price: Number(formData.price),
       durationMonths: Number(formData.durationMonths),
@@ -48,28 +51,44 @@ const OffersList: React.FC<OffersListProps> = ({ offers, userRole, onSave, onDel
       description: formData.description || '',
       imageUrl: formData.imageUrl || editingOffer?.imageUrl
     };
-    onSave(newOffer);
-    setIsModalOpen(false);
+    
+    try {
+        await onSave(newOffer);
+        setIsModalOpen(false);
+    } catch (e) {
+        setErrorMsg("Erreur de sauvegarde");
+    } finally {
+        setIsSaving(false);
+    }
   };
+
+  const handleDelete = async (id: string) => {
+      if(window.confirm('Êtes-vous sûr de vouloir supprimer cette offre ?')) {
+          await onDelete(id);
+      }
+  }
 
   const handleGenerateImage = async (offer: Offer) => {
     if (!isAdmin) return;
     if (generatingId) return; // Prevent multiple clicks
+    
     setGeneratingId(offer.id);
+    setErrorMsg(null);
     
     const imageUrl = await generateOfferImage(offer.name, offer.description);
     
     if (imageUrl) {
-        onSave({ ...offer, imageUrl });
+        await onSave({ ...offer, imageUrl });
     } else {
-        alert("Erreur lors de la génération de l'image. Veuillez réessayer.");
+        setErrorMsg(`Échec de la génération pour ${offer.name}. Vérifiez votre connexion ou réessayez.`);
+        setTimeout(() => setErrorMsg(null), 5000); // Auto hide error
     }
     
     setGeneratingId(null);
   };
 
   return (
-    <div className="p-6 h-full overflow-y-auto">
+    <div className="p-6 h-full overflow-y-auto relative">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-white">Plans & Offres</h2>
         {isAdmin && (
@@ -81,6 +100,14 @@ const OffersList: React.FC<OffersListProps> = ({ offers, userRole, onSave, onDel
             </button>
         )}
       </div>
+
+      {/* Error Toast */}
+      {errorMsg && (
+        <div className="fixed top-4 right-4 z-50 bg-rose-500 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-2 animate-bounce-in">
+            <AlertCircle size={20} />
+            <span className="text-sm font-medium">{errorMsg}</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {offers.map(offer => (
@@ -109,7 +136,7 @@ const OffersList: React.FC<OffersListProps> = ({ offers, userRole, onSave, onDel
                                 handleGenerateImage(offer);
                             }}
                             disabled={generatingId === offer.id}
-                            className="p-2 bg-black/40 hover:bg-brand-600 text-white backdrop-blur-md rounded-full shadow-lg border border-white/10 transition-all disabled:cursor-not-allowed"
+                            className="p-2 bg-black/40 hover:bg-brand-600 text-white backdrop-blur-md rounded-full shadow-lg border border-white/10 transition-all disabled:cursor-not-allowed disabled:opacity-70"
                             title="Générer une image avec Gemini IA"
                         >
                             {generatingId === offer.id ? (
@@ -148,7 +175,7 @@ const OffersList: React.FC<OffersListProps> = ({ offers, userRole, onSave, onDel
                             <Edit2 size={16} /> Éditer
                         </button>
                         <button 
-                            onClick={() => onDelete(offer.id)}
+                            onClick={() => handleDelete(offer.id)}
                             className="w-10 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg flex justify-center items-center transition-colors"
                         >
                             <Trash2 size={16} />
@@ -215,7 +242,9 @@ const OffersList: React.FC<OffersListProps> = ({ offers, userRole, onSave, onDel
 
               <div className="flex gap-3 mt-6 pt-4">
                  <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors">Annuler</button>
-                 <button type="submit" className="flex-1 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-colors">Sauvegarder</button>
+                 <button type="submit" disabled={isSaving} className="flex-1 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-colors flex items-center justify-center">
+                    {isSaving ? <Loader2 className="animate-spin" /> : 'Sauvegarder'}
+                 </button>
               </div>
             </form>
           </div>

@@ -1,24 +1,26 @@
 import React, { useState } from 'react';
 import { Subscriber, Offer, Status, User } from '../types';
-import { Search, Plus, Edit2, Trash2, Mail, CheckCircle, XCircle, Clock, Shield } from 'lucide-react';
-import { getOfferById } from '../services/storageService';
+import { Search, Plus, Edit2, Trash2, Mail, CheckCircle, XCircle, Clock, Shield, AlertTriangle, Loader2 } from 'lucide-react';
 import { generateRenewalEmail } from '../services/geminiService';
 
 interface SubscribersListProps {
   subscribers: Subscriber[];
   offers: Offer[];
   currentUser: User;
-  onAdd: (sub: Subscriber) => void;
-  onEdit: (sub: Subscriber) => void;
-  onDelete: (id: string) => void;
+  allUsers: User[]; // Liste de tous les revendeurs pour l'admin
+  onAdd: (sub: Subscriber) => Promise<void>;
+  onEdit: (sub: Subscriber) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
 }
 
-const SubscribersList: React.FC<SubscribersListProps> = ({ subscribers, offers, currentUser, onAdd, onEdit, onDelete }) => {
+const SubscribersList: React.FC<SubscribersListProps> = ({ subscribers, offers, currentUser, allUsers, onAdd, onEdit, onDelete }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSub, setEditingSub] = useState<Subscriber | null>(null);
   const [emailDraft, setEmailDraft] = useState<{subId: string, content: string} | null>(null);
   const [loadingEmail, setLoadingEmail] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Form State
   const [formData, setFormData] = useState<Partial<Subscriber>>({
@@ -27,8 +29,16 @@ const SubscribersList: React.FC<SubscribersListProps> = ({ subscribers, offers, 
     offerId: offers[0]?.id || ''
   });
 
-  // Filter subs: Always filter by search term.
-  // Note: The parent component handles the security filtering (Reseller sees only theirs).
+  const findOffer = (id: string) => offers.find(o => o.id === id);
+
+  // Helper to get reseller username
+  const getResellerName = (resellerId: string) => {
+      if (resellerId === 'admin') return 'Admin';
+      const reseller = allUsers.find(u => u.id === resellerId);
+      return reseller ? reseller.username : resellerId;
+  };
+
+  // Filter subs
   const filteredSubs = subscribers.filter(s => 
     s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     s.email.toLowerCase().includes(searchTerm.toLowerCase())
@@ -59,15 +69,14 @@ const SubscribersList: React.FC<SubscribersListProps> = ({ subscribers, offers, 
     setIsModalOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
     
-    // Determine reseller ID: if editing, keep existing. If new, assign current user.
-    // If Admin is creating, they effectively own it unless we add a field to pick reseller (simplified here).
     const resellerId = editingSub ? editingSub.resellerId : currentUser.id;
 
     const newSub: Subscriber = {
-      id: editingSub ? editingSub.id : Date.now().toString(),
+      id: editingSub ? editingSub.id : crypto.randomUUID(), // Use UUID for Supabase
       fullName: formData.fullName || '',
       email: formData.email || '',
       offerId: formData.offerId || '',
@@ -79,13 +88,29 @@ const SubscribersList: React.FC<SubscribersListProps> = ({ subscribers, offers, 
       resellerId: resellerId
     };
 
-    if (editingSub) {
-      onEdit(newSub);
-    } else {
-      onAdd(newSub);
+    try {
+        if (editingSub) {
+            await onEdit(newSub);
+        } else {
+            await onAdd(newSub);
+        }
+        setIsModalOpen(false);
+    } catch (e) {
+        setErrorMsg("Erreur lors de la sauvegarde.");
+    } finally {
+        setIsSaving(false);
     }
-    setIsModalOpen(false);
   };
+  
+  const handleDelete = async (id: string) => {
+      if(window.confirm("Êtes-vous sûr ?")) {
+          try {
+              await onDelete(id);
+          } catch(e) {
+              setErrorMsg("Erreur lors de la suppression.");
+          }
+      }
+  }
 
   const handleOfferChange = (offerId: string) => {
     const offer = offers.find(o => o.id === offerId);
@@ -101,12 +126,25 @@ const SubscribersList: React.FC<SubscribersListProps> = ({ subscribers, offers, 
 
   const handleGenerateEmail = async (sub: Subscriber) => {
     const offer = offers.find(o => o.id === sub.offerId);
-    if (!offer) return;
+    if (!offer) {
+        setErrorMsg("Impossible de trouver l'offre associée à cet abonné.");
+        setTimeout(() => setErrorMsg(null), 4000);
+        return;
+    }
     
     setLoadingEmail(true);
     setEmailDraft(null);
+    setErrorMsg(null);
+
     const content = await generateRenewalEmail(sub, offer);
-    setEmailDraft({ subId: sub.id, content });
+    
+    if (content.startsWith("Erreur")) {
+        setErrorMsg(content);
+        setTimeout(() => setErrorMsg(null), 4000);
+    } else {
+        setEmailDraft({ subId: sub.id, content });
+    }
+    
     setLoadingEmail(false);
   };
 
@@ -120,7 +158,15 @@ const SubscribersList: React.FC<SubscribersListProps> = ({ subscribers, offers, 
   };
 
   return (
-    <div className="p-6 h-full flex flex-col overflow-hidden">
+    <div className="p-6 h-full flex flex-col overflow-hidden relative">
+       {/* Error Toast */}
+       {errorMsg && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50 bg-rose-500 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-2">
+            <AlertTriangle size={20} />
+            <span className="text-sm font-medium">{errorMsg}</span>
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-4">
             <h2 className="text-2xl font-bold text-white">Gestion des Abonnés</h2>
@@ -166,7 +212,7 @@ const SubscribersList: React.FC<SubscribersListProps> = ({ subscribers, offers, 
             </thead>
             <tbody className="divide-y divide-slate-700">
               {filteredSubs.map(sub => {
-                const offer = getOfferById(sub.offerId);
+                const offer = findOffer(sub.offerId);
                 return (
                   <React.Fragment key={sub.id}>
                   <tr className="hover:bg-slate-700/30 transition-colors group">
@@ -187,7 +233,7 @@ const SubscribersList: React.FC<SubscribersListProps> = ({ subscribers, offers, 
                            ) : (
                                <span className="text-xs bg-slate-700 px-2 py-0.5 rounded text-slate-300 flex items-center gap-1 w-fit">
                                   <Shield size={10} className="text-brand-400" />
-                                  {sub.resellerId}
+                                  {getResellerName(sub.resellerId)}
                                </span>
                            )}
                         </td>
@@ -203,7 +249,7 @@ const SubscribersList: React.FC<SubscribersListProps> = ({ subscribers, offers, 
                         <button onClick={() => handleOpenModal(sub)} className="p-1.5 hover:bg-slate-600 text-slate-400 rounded transition-colors">
                           <Edit2 size={16} />
                         </button>
-                        <button onClick={() => onDelete(sub.id)} className="p-1.5 hover:bg-rose-500/20 text-rose-400 rounded transition-colors">
+                        <button onClick={() => handleDelete(sub.id)} className="p-1.5 hover:bg-rose-500/20 text-rose-400 rounded transition-colors">
                           <Trash2 size={16} />
                         </button>
                       </div>
@@ -306,15 +352,17 @@ const SubscribersList: React.FC<SubscribersListProps> = ({ subscribers, offers, 
 
               <div className="flex gap-3 mt-6 pt-4">
                  <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors">Annuler</button>
-                 <button type="submit" className="flex-1 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg transition-colors">Sauvegarder</button>
+                 <button disabled={isSaving} type="submit" className="flex-1 py-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white rounded-lg transition-colors flex justify-center items-center gap-2">
+                    {isSaving ? <Loader2 className="animate-spin" size={18} /> : 'Sauvegarder'}
+                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
       {loadingEmail && (
-          <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center">
-              <div className="bg-slate-800 p-4 rounded-lg shadow-xl flex items-center gap-3">
+          <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center backdrop-blur-sm">
+              <div className="bg-slate-800 p-4 rounded-lg shadow-xl flex items-center gap-3 border border-brand-500/50">
                   <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand-500"></div>
                   <span className="text-white">Gemini rédige votre email...</span>
               </div>

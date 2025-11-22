@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User } from '../types';
 import { loginUser } from '../services/storageService';
-import { Tv, Lock, User as UserIcon } from 'lucide-react';
+import { Tv, Lock, User as UserIcon, Loader2 } from 'lucide-react';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -11,16 +11,24 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
     
-    const user = loginUser(username, password);
-    if (user) {
-      onLogin(user);
-    } else {
-      setError('Identifiants incorrects');
+    try {
+        const user = await loginUser(username, password);
+        if (user) {
+          onLogin(user);
+        } else {
+          setError('Identifiants incorrects');
+        }
+    } catch (e) {
+        setError("Erreur de connexion au serveur");
+    } finally {
+        setIsLoading(false);
     }
   };
 
@@ -82,16 +90,15 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
           <button
             type="submit"
-            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-brand-600 hover:bg-brand-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500 transition-all hover:shadow-lg hover:shadow-brand-500/25"
+            disabled={isLoading}
+            className="w-full flex justify-center items-center gap-2 py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-brand-600 hover:bg-brand-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500 transition-all hover:shadow-lg hover:shadow-brand-500/25 disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            Se connecter
+            {isLoading ? <Loader2 className="animate-spin" size={20} /> : 'Se connecter'}
           </button>
         </form>
         
         <div className="mt-6 text-center">
-          <p className="text-xs text-slate-500">
-            Compte démo par défaut : <span className="font-mono text-brand-400">admin / admin</span>
-          </p>
+         
         </div>
       </div>
     </div>

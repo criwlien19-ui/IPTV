@@ -48,17 +48,27 @@ const AIAssistant: React.FC<AIAssistantProps> = ({ subscribers, offers }) => {
     setInput('');
     setIsLoading(true);
 
-    const responseText = await generateAIResponse(userMsg.content, subscribers, offers);
+    try {
+        const responseText = await generateAIResponse(userMsg.content, subscribers, offers);
 
-    const aiMsg: Message = {
-      id: (Date.now() + 1).toString(),
-      role: 'ai',
-      content: responseText,
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, aiMsg]);
-    setIsLoading(false);
+        const aiMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'ai',
+            content: responseText,
+            timestamp: new Date()
+        };
+        setMessages(prev => [...prev, aiMsg]);
+    } catch (error) {
+        const errorMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'ai',
+            content: "Désolé, je rencontre des difficultés techniques pour répondre. Veuillez réessayer.",
+            timestamp: new Date()
+        }
+        setMessages(prev => [...prev, errorMsg]);
+    } finally {
+        setIsLoading(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

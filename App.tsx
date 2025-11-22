@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Tag, Sparkles, Menu, X, Tv, AlertTriangle, ChevronRight, UserPlus, LogOut, Shield } from 'lucide-react';
+import { LayoutDashboard, Users, Tag, Sparkles, Menu, X, Tv, AlertTriangle, ChevronRight, UserPlus, LogOut, Shield, Loader2, Wifi } from 'lucide-react';
 import { Subscriber, Offer, Status, User } from './types';
 import * as Storage from './services/storageService';
+import ErrorBoundary from './components/ErrorBoundary';
 
 import Dashboard from './components/Dashboard';
 import SubscribersList from './components/SubscribersList';
@@ -35,30 +36,73 @@ const AppContent: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
   const [offers, setOffers] = useState<Offer[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]); // State pour stocker les infos des revendeurs
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showNotification, setShowNotification] = useState(true);
+  const [loadingData, setLoadingData] = useState(false);
+  const [dbConnected, setDbConnected] = useState(true);
 
   // Initial Load
   useEffect(() => {
-    const currentUser = Storage.getCurrentUser();
-    if (currentUser) {
-      setUser(currentUser);
-    }
+    const init = async () => {
+        const currentUser = Storage.getCurrentUser();
+        if (currentUser) {
+          setUser(currentUser);
+        }
+        // Initial check and seed
+        const connected = await Storage.checkConnection();
+        setDbConnected(connected);
+        if (connected) {
+            await Storage.initDatabase();
+        }
+    };
+    init();
   }, []);
 
-  // Data Loading Effect
+  // Realtime Subscription & Initial Fetch
   useEffect(() => {
-    if (user) {
-      const subs = Storage.getSubscribers();
-      // If admin, show all. If reseller, show only theirs.
-      if (user.role === 'admin') {
-         setSubscribers(subs);
-      } else {
-         setSubscribers(subs.filter(s => s.resellerId === user.id));
+    if (!user || !dbConnected) return;
+
+    // 1. Fetch initial data
+    refreshData();
+
+    // 2. Subscribe to realtime changes
+    const unsubscribe = Storage.subscribeToDataChanges(() => {
+       // When DB changes, re-fetch data
+       refreshData(true); // Pass true to indicate background refresh
+    });
+
+    return () => {
+        unsubscribe();
+    };
+  }, [user, dbConnected]);
+
+  const refreshData = async (isBackground = false) => {
+      if (!isBackground) setLoadingData(true);
+      try {
+        const [subs, offs] = await Promise.all([
+            Storage.getSubscribers(),
+            Storage.getOffers()
+        ]);
+        
+        setOffers(offs);
+        
+        // Filter based on role
+        if (user?.role === 'admin') {
+            setSubscribers(subs);
+            // L'admin a besoin de la liste des utilisateurs pour afficher les noms des revendeurs
+            const usersList = await Storage.getUsers();
+            setAllUsers(usersList);
+        } else if (user) {
+            setSubscribers(subs.filter(s => s.resellerId === user.id));
+            setAllUsers([]);
+        }
+      } catch (e) {
+          console.error("Failed to load data", e);
+      } finally {
+          if (!isBackground) setLoadingData(false);
       }
-      setOffers(Storage.getOffers());
-    }
-  }, [user]);
+  };
 
   const handleLogin = (loggedInUser: User) => {
     setUser(loggedInUser);
@@ -70,43 +114,38 @@ const AppContent: React.FC = () => {
   };
 
   // CRUD Handlers
-  const handleAddSubscriber = (sub: Subscriber) => {
-    Storage.saveSubscriber(sub);
-    refreshData();
+  // Note: We don't strictly need to call refreshData() here anymore because 
+  // the Realtime subscription will catch the change and trigger it.
+  // However, keeping it ensures instant UI updates even if realtime lags slightly.
+  const handleAddSubscriber = async (sub: Subscriber) => {
+    await Storage.saveSubscriber(sub);
+    await refreshData();
   };
 
-  const handleEditSubscriber = (sub: Subscriber) => {
-    Storage.saveSubscriber(sub);
-    refreshData();
+  const handleEditSubscriber = async (sub: Subscriber) => {
+    await Storage.saveSubscriber(sub);
+    await refreshData();
   };
 
-  const handleDeleteSubscriber = (id: string) => {
-    if (window.confirm('Êtes-vous sûr de vouloir supprimer cet abonné ?')) {
-      Storage.deleteSubscriber(id);
-      refreshData();
-    }
+  const handleDeleteSubscriber = async (id: string) => {
+    await Storage.deleteSubscriber(id);
+    await refreshData();
   };
 
-  const handleSaveOffer = (offer: Offer) => {
-    Storage.saveOffer(offer);
-    setOffers(Storage.getOffers()); // Refresh offers
+  const handleSaveOffer = async (offer: Offer) => {
+    await Storage.saveOffer(offer);
+    // Fetch logic is inside refreshData which is triggered by realtime or manual call
+    // But explicit call here for safety
+    const offs = await Storage.getOffers();
+    setOffers(offs);
   };
 
-  const handleDeleteOffer = (id: string) => {
-    if (window.confirm('Êtes-vous sûr de vouloir supprimer cette offre ?')) {
-      Storage.deleteOffer(id);
-      setOffers(Storage.getOffers());
-    }
+  const handleDeleteOffer = async (id: string) => {
+    await Storage.deleteOffer(id);
+    const offs = await Storage.getOffers();
+    setOffers(offs);
   };
 
-  const refreshData = () => {
-    const subs = Storage.getSubscribers();
-    if (user?.role === 'admin') {
-        setSubscribers(subs);
-    } else if (user) {
-        setSubscribers(subs.filter(s => s.resellerId === user.id));
-    }
-  };
 
   // Notifications Logic
   const expiringCount = useMemo(() => {
@@ -122,6 +161,21 @@ const AppContent: React.FC = () => {
 
   if (!user) {
     return <Login onLogin={handleLogin} />;
+  }
+
+  if (!dbConnected) {
+      return (
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white p-6">
+            <div className="bg-rose-500/10 border border-rose-500/20 p-6 rounded-xl max-w-md text-center">
+                <AlertTriangle size={48} className="mx-auto text-rose-500 mb-4"/>
+                <h1 className="text-2xl font-bold mb-2">Erreur de Connexion Supabase</h1>
+                <p className="text-slate-300 mb-4">L'application n'arrive pas à se connecter à la base de données.</p>
+                <p className="text-xs text-slate-500 font-mono bg-slate-900 p-2 rounded">
+                    Veuillez vérifier VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans vos variables d'environnement.
+                </p>
+            </div>
+        </div>
+      )
   }
 
   return (
@@ -209,6 +263,9 @@ const AppContent: React.FC = () => {
         </nav>
 
         <div className="p-4 border-t border-slate-800">
+            <div className="flex items-center gap-2 justify-center mb-4 text-xs text-slate-500">
+               <span className="flex items-center gap-1"><Wifi size={12} className="text-emerald-500"/> DB Connecté & Live</span>
+            </div>
             <button 
                 onClick={handleLogout}
                 className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-slate-400 hover:bg-rose-500/10 hover:text-rose-500 transition-colors"
@@ -243,7 +300,15 @@ const AppContent: React.FC = () => {
         )}
 
         {/* Routes */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden relative">
+            {loadingData && (
+                <div className="absolute inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center">
+                    <div className="bg-slate-800 p-4 rounded-xl shadow-2xl flex items-center gap-3 border border-slate-700">
+                        <Loader2 className="animate-spin text-brand-500" />
+                        <span className="font-medium">Chargement des données...</span>
+                    </div>
+                </div>
+            )}
             <Routes>
             <Route path="/" element={<Dashboard subscribers={subscribers} offers={offers} />} />
             <Route 
@@ -253,6 +318,7 @@ const AppContent: React.FC = () => {
                     subscribers={subscribers} 
                     offers={offers} 
                     currentUser={user}
+                    allUsers={allUsers}
                     onAdd={handleAddSubscriber} 
                     onEdit={handleEditSubscriber} 
                     onDelete={handleDeleteSubscriber} 
@@ -287,9 +353,13 @@ const AppContent: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <HashRouter>
-      <AppContent />
-    </HashRouter>
+    <React.StrictMode>
+      <ErrorBoundary>
+        <HashRouter>
+          <AppContent />
+        </HashRouter>
+      </ErrorBoundary>
+    </React.StrictMode>
   );
 };
 
