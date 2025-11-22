@@ -1,7 +1,23 @@
 import { GoogleGenAI } from "@google/genai";
 import { Subscriber, Offer } from '../types';
 
-const apiKey = process.env.API_KEY;
+// Clé API par défaut fournie par l'utilisateur
+const DEFAULT_API_KEY = 'AIzaSyBhDhD-thqxZo0tH1SzHXfIIVOZj5Uk30E';
+
+// Récupération sécurisée de la clé
+const getApiKey = (): string => {
+  // Tentative via process.env (injecté par Vite)
+  try {
+    if (process.env.API_KEY) {
+      return process.env.API_KEY;
+    }
+  } catch (e) {
+    // Ignore error if process is undefined
+  }
+  return DEFAULT_API_KEY;
+};
+
+const apiKey = getApiKey();
 
 // Helper to format data for the AI context
 const formatContext = (subs: Subscriber[], offers: Offer[]) => {
@@ -24,7 +40,7 @@ export const generateAIResponse = async (
   offers: Offer[]
 ): Promise<string> => {
   if (!apiKey) {
-    return "Erreur de configuration : La clé API Gemini est manquante. Veuillez vérifier vos variables d'environnement.";
+    return "Erreur de configuration : La clé API Gemini est manquante.";
   }
 
   try {
@@ -49,9 +65,10 @@ export const generateAIResponse = async (
     });
 
     return response.text || "Désolé, je n'ai pas pu générer de réponse pertinente pour le moment.";
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini API Error:", error);
-    return "Une erreur technique s'est produite lors de la communication avec l'IA. Veuillez réessayer plus tard.";
+    // Retourne le message d'erreur réel pour aider au diagnostic
+    return `Erreur technique IA : ${error.message || 'Erreur inconnue'}. (Vérifiez votre clé API ou vos quotas)`;
   }
 };
 
@@ -83,9 +100,9 @@ export const generateRenewalEmail = async (subscriber: Subscriber, offer: Offer)
             contents: prompt
         });
         return response.text || "Erreur : La génération de l'email a échoué.";
-    } catch (e) {
-        console.error(e);
-        return "Erreur : Impossible de contacter le service d'IA.";
+    } catch (error: any) {
+        console.error("Gemini Email Error:", error);
+        return `Erreur IA : ${error.message || "Impossible de contacter le service."}`;
     }
 };
 
